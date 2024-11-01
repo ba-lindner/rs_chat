@@ -1,0 +1,73 @@
+Message format: STX <command> SYN <args> ETX
+multiple args separated by EM
+
+command list:
+Client -> Server:
+	login <name>
+		start of active connection
+	listen
+		start of passive connection
+	ping
+		check if server is still available
+	post <message> EM <channel>
+		broadcast message
+	send <name> EM <message>
+		send message only to specific person
+	names <channel>
+		get list of client names
+	about
+		get some info about server
+	features
+		get list of features provided by server
+	new_channel <channel> EM <password>
+		create new channel with password (may be empty)
+		automatically subscribes to newly created channel
+	list_channels
+		list available channels
+	subscribe <channel> EM <password>
+		subscribe to channel
+	unsubscribe <channel>
+		unsubscribe from channel
+	add_bot <json [{"cmd": "string", "args": ["string"]}]>
+
+Server -> Client:
+	ack
+		login ok, ping succeeded
+	msg <channel> EM <name> EM <message>
+		received message from person (both broadcast and direct)
+	err <why>
+		an error has occurred
+		failed login, duplicate name, ...
+	info <data..>
+		response to non-message command
+
+responses:
+login
+	ack
+	err
+listen
+	ack
+ping
+	ack
+post
+	ack
+send
+	ack
+	err
+names
+	info [ <name> EM ]*
+about
+	info <some string>
+features
+	info [ <feature> EM ]*
+new_channel
+	ack
+	err
+list_channels
+	info [ <channel> EM ]*
+subscribe
+	ack
+	err
+unsubscribe
+	ack
+	err
