@@ -9,7 +9,7 @@ Client -> Server:
 		start of passive connection
 	ping
 		check if server is still available
-	post <message> EM <channel>
+	post <channel> EM <message>
 		broadcast message
 	send <name> EM <message>
 		send message only to specific person

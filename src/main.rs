@@ -10,13 +10,15 @@ fn main() {
         }
         Some(conn) => {
             // start primary client
-            let Some((uname, server_ip)) = conn.split_once("@") else {
+            let Some((_uname, _server_ip)) = conn.split_once("@") else {
                 eprintln!("please provide username and server address in the format name@address");
                 return;
             };
+            unimplemented!("client does not exist yet");
         }
         None => {
             // start passive client
+            unimplemented!("client does not exist yet");
         }
     }
 }

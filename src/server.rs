@@ -1,4 +1,5 @@
 use std::{
+    cell::LazyCell,
     collections::HashMap,
     io::Error,
     net::{TcpListener, TcpStream},
@@ -38,29 +39,66 @@ struct Channel {
     msg_queue: Vec<Package>,
 }
 
+macro_rules! get_channel {
+    ($channels:expr, $channel:expr, $client:expr) => {{
+        if let Some(chan) = $channels.get_mut(&$channel) {
+            if let Some(name) = &$client.name {
+                if chan.members.contains(name) {
+                    Some(chan)
+                } else {
+                    $client.err("not subscribed to channel");
+                    None
+                }
+            } else {
+                $client.err("not subscribed to channel");
+                None
+            }
+        } else {
+            $client.err("channel doesn't exist");
+            None
+        }
+    }};
+}
+
 pub struct Server {
     login_rx: Receiver<Client>,
     active_clients: HashMap<String, Client>,
     passive_clients: Vec<Client>,
     channels: HashMap<String, Channel>,
+    direct_msg: Vec<(String, Package)>,
 }
 
 impl Server {
+    pub const ABOUT: LazyCell<String> =
+        LazyCell::new(|| format!("rs_chat server v{}", env!("CARGO_PKG_VERSION")));
+
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         login_thread(tx);
+        let global = Channel {
+            name: String::new(),
+            password: String::new(),
+            members: Vec::new(),
+            msg_queue: Vec::new(),
+        };
         Self {
             login_rx: rx,
             active_clients: HashMap::new(),
             passive_clients: Vec::new(),
-            channels: HashMap::new(),
+            channels: {
+                let mut map = HashMap::new();
+                map.insert(String::new(), global);
+                map
+            },
+            direct_msg: Vec::new(),
         }
     }
 
     pub fn run(&mut self) -> ! {
         loop {
             self.collect_new_clients();
-            self.handle_request();
+            self.handle_requests();
+            self.flush_queues();
             self.prune();
             thread::sleep(Duration::from_millis(5));
         }
@@ -74,7 +112,8 @@ impl Server {
                 } else {
                     let name = name.clone();
                     new_client.ack();
-                    self.active_clients.insert(name, new_client);
+                    self.active_clients.insert(name.clone(), new_client);
+                    self.channels.get_mut("").expect("global channel should always exist").members.push(name);
                 }
             } else {
                 new_client.ack();
@@ -83,131 +122,85 @@ impl Server {
         }
     }
 
-    fn handle_request(&mut self) {
-        let mut posted_msg: Vec<Package> = Vec::new();
-        let mut direct_msg: Vec<(String, Package)> = Vec::new();
-        let mut name_req: Vec<String> = Vec::new();
+    fn handle_requests(&mut self) {
         for (name, client) in &mut self.active_clients {
             while let Some(pkg) = client.conn.get_package() {
-                match pkg.cmd.as_str() {
-                    "ping" => client.ack(),
-                    "post" => {
-                        if pkg.args.is_empty() {
-                            client.err("please provide a message");
-                        } else if let Some(channel) = pkg.args.get(1) {
-                            if let Some(channel) = self.channels.get_mut(channel) {
-                                if channel.members.contains(name) {
-                                    channel.msg_queue.push(Package::msg(
-                                        &channel.name,
-                                        name,
-                                        &pkg.args[0],
-                                    ));
-                                } else {
-                                    client.err("not subscribed to channel");
-                                }
-                            } else {
-                                client.err("channel doesn't exist");
-                            }
-                        } else {
-                            posted_msg.push(Package::msg("", name, &pkg.args[0]));
-                        }
-                    }
-                    "send" => {
-                        if let [recv, msg] = pkg.args.as_slice() {
-                            direct_msg.push((recv.clone(), Package::msg("__direct", name, msg)));
+                match Request::parse(pkg) {
+                    Request::Login(_) | Request::Listen => client.err("already logged in"),
+                    Request::Ping => client.ack(),
+                    Request::Post(channel, msg) => {
+                        if let Some(chan) = get_channel!(self.channels, channel, client) {
+                            chan.msg_queue.push(Package::msg(channel, name, msg));
                             client.ack();
+                        }
+                    },
+                    Request::Send(recp, msg) => {
+                        if self.channels.get("").expect("global channel should always exist").members.contains(&recp) {
+                            self.direct_msg.push((recp, Package::msg("__direct", name, msg)));
                         } else {
-                            client.err("please provide receiver and message");
+                            client.err("unknown user");
+                        }
+                    },
+                    Request::Names(channel) => {
+                        if let Some(chan) = get_channel!(self.channels, channel, client) {
+                            client.info(chan.members.clone());
                         }
                     }
-                    "names" => {
-                        name_req.push(name.clone());
-                    }
-                    "about" => {
-                        client.info([format!("rs_chat server v{}", env!("CARGO_PKG_NAME"))]);
-                    }
-                    "new_channel" => {
-                        if let [channel, passwd] = pkg.args.as_slice() {
-                            if channel == "__direct" || self.channels.contains_key(channel) {
-                                client.err("channel name already used");
-                            } else {
-                                self.channels.insert(
-                                    channel.clone(),
-                                    Channel {
-                                        name: channel.clone(),
-                                        password: passwd.clone(),
-                                        members: vec![name.clone()],
-                                        msg_queue: Vec::new(),
-                                    },
-                                );
-                            }
+                    Request::About => client.info([&*Self::ABOUT]),
+                    Request::NewChannel(channel, passwd) => {
+                        if self.channels.contains_key(&channel) || &channel == "__private" {
+                            client.err("channel exists already");
                         } else {
-                            client.err("please provide channel name and a password");
+                            self.channels.insert(channel.clone(), Channel {
+                                name: channel,
+                                password: passwd,
+                                members: vec![name.clone()],
+                                msg_queue: Vec::new(),
+                            });
+                            client.ack();
                         }
-                    }
-                    "list_channels" => {
-                        client.info(self.channels.keys());
-                    }
-                    "subscribe" => {
-                        if let [channel, passwd] = pkg.args.as_slice() {
-                            if let Some(ch) = self.channels.get_mut(channel) {
-                                if &ch.password == passwd {
-                                    ch.members.push(name.clone());
-                                    client.ack();
-                                } else {
-                                    client.err("wrong password");
-                                }
+                    },
+                    Request::ListChannels => client.info(self.channels.keys()),
+                    Request::Subscribe(channel, passwd) => {
+                        if let Some(chan) = self.channels.get_mut(&channel) {
+                            if chan.members.contains(name) {
+                                client.err("already subscribed to channel");
+                            } else if chan.password == passwd {
+                                chan.members.push(name.clone());
+                                client.ack();
                             } else {
-                                client.err("channel doesn't exist");
+                                client.err("wrong password");
                             }
                         } else {
-                            client.err("please provide channel and password");
+                            client.err("channel doesn't exist");
                         }
-                    }
-                    "unsubscribe" => {
-                        if let Some(channel) = pkg.args.get(0) {
-                            if let Some(ch) = self.channels.get_mut(channel) {
-                                if let Some(idx) = ch.members.iter().position(|n| n == name) {
-                                    ch.members.swap_remove(idx);
-                                    client.ack();
-                                } else {
-                                    client.err("not subscribed to channel");
-                                }
-                            } else {
-                                client.err("channel doesn't exist");
-                            }
-                        } else {
-                            client.err("please provide the channel");
-                        };
-                    }
-                    cmd => {
-                        client.err(format!("unknown command {cmd}"));
+                    },
+                    Request::Unsubscribe(channel) => {
+                        if let Some(chan) = get_channel!(self.channels, channel, client) {
+                            chan.members.retain(|n| n != name);
+                            client.ack();
+                        }
+                    },
+                    Request::Unknown(cmd) => client.err(format!("unknown command {cmd}")),
+                    Request::MissingArgs(args) => client.err(format!("please provide {args}")),
+                }
+            }
+        }
+    }
+
+    fn flush_queues(&mut self) {
+        for channel in self.channels.values_mut() {
+            for msg in channel.msg_queue.drain(..) {
+                for name in &channel.members {
+                    if let Some(client) = self.active_clients.get_mut(name) {
+                        client.conn.send_package(&msg);
                     }
                 }
             }
         }
-        for msg in posted_msg {
-            for client in self.active_clients.values_mut() {
-                client.conn.send_package(&msg);
-            }
-            for client in &mut self.passive_clients {
-                client.conn.send_package(&msg);
-            }
-        }
-        for (recipient, msg) in direct_msg {
-            if let Some(recp) = self.active_clients.get_mut(&recipient) {
-                recp.conn.send_package(msg);
-            }
-        }
-        if !name_req.is_empty() {
-            let name_pkg = Package {
-                cmd: "info".to_string(),
-                args: self.active_clients.keys().map(Clone::clone).collect(),
-            };
-            for name in name_req {
-                if let Some(client) = self.active_clients.get_mut(&name) {
-                    client.conn.send_package(&name_pkg);
-                }
+        for (recp, pkg) in self.direct_msg.drain(..) {
+            if let Some(client) = self.active_clients.get_mut(&recp) {
+                client.conn.send_package(pkg);
             }
         }
     }
@@ -215,7 +208,10 @@ impl Server {
     fn prune(&mut self) {
         self.active_clients.retain(|_, c| c.conn.alive());
         self.passive_clients.retain(|c| c.conn.alive());
-        self.channels.retain(|_, c| !c.members.is_empty());
+        self.channels.retain(|_, c| {
+            c.members.retain(|n| self.active_clients.contains_key(n));
+            &c.name == "" || !c.members.is_empty()
+        });
     }
 }
 
@@ -233,21 +229,24 @@ fn login_thread(tx: Sender<Client>) {
 fn login_client(stream: Result<TcpStream, Error>) -> Option<Client> {
     let mut conn = Connection::new(stream.ok()?)?;
     for _ in 0..10 {
-        if let Some(mut pkg) = conn.get_package() {
-            match (pkg.cmd.as_str(), pkg.args.len()) {
-                ("login", 1) => {
-                    let name = std::mem::take(&mut pkg.args[0]);
+        if let Some(pkg) = conn.get_package() {
+            match Request::parse(pkg) {
+                Request::Login(name ) => {
                     if name.is_empty() {
                         conn.send_package(Package::err("please provide a name"));
                         continue;
                     }
-                    let client = Client {
+                    return Some(Client {
                         conn,
                         name: Some(name),
-                    };
-                    return Some(client);
+                    });
                 }
-                ("listen", 0) => {}
+                Request::Listen => {
+                    return Some(Client {
+                        conn,
+                        name: None,
+                    });
+                }
                 _ => {
                     conn.send_package(Package::err("please login first"));
                 }
@@ -256,4 +255,88 @@ fn login_client(stream: Result<TcpStream, Error>) -> Option<Client> {
         thread::sleep(Duration::from_secs(1));
     }
     None
+}
+
+enum Request {
+    Login(String),
+    Listen,
+    Ping,
+    Post(String, String),
+    Send(String, String),
+    Names(String),
+    About,
+    NewChannel(String, String),
+    ListChannels,
+    Subscribe(String, String),
+    Unsubscribe(String),
+    Unknown(String),
+    MissingArgs(&'static str),
+}
+
+impl Request {
+    pub fn parse(pkg: Package) -> Self {
+        match pkg.cmd.as_str() {
+            "login" => {
+                if pkg.args.len() >= 2 {
+                    let mut args = pkg.args.into_iter();
+                    Request::Login(args.next().unwrap())
+                } else {
+                    Request::MissingArgs("name")
+                }
+            }
+            "listen" => Request::Listen,
+            "ping" => Request::Ping,
+            "post" => {
+                if pkg.args.len() >= 2 {
+                    let mut args = pkg.args.into_iter();
+                    Request::Post(args.next().unwrap(), args.next().unwrap())
+                } else {
+                    Request::MissingArgs("channel, message")
+                }
+            }
+            "send" => {
+                if pkg.args.len() >= 2 {
+                    let mut args = pkg.args.into_iter();
+                    Request::Send(args.next().unwrap(), args.next().unwrap())
+                } else {
+                    Request::MissingArgs("name, message")
+                }
+            }
+            "names" => {
+                if pkg.args.len() >= 1 {
+                    let mut args = pkg.args.into_iter();
+                    Request::Names(args.next().unwrap())
+                } else {
+                    Request::MissingArgs("channel")
+                }
+            }
+            "about" => Request::About,
+            "new_channel" => {
+                if pkg.args.len() >= 2 {
+                    let mut args = pkg.args.into_iter();
+                    Request::NewChannel(args.next().unwrap(), args.next().unwrap())
+                } else {
+                    Request::MissingArgs("channel, password")
+                }
+            }
+            "list_channels" => Request::ListChannels,
+            "subscribe" => {
+                if pkg.args.len() >= 2 {
+                    let mut args = pkg.args.into_iter();
+                    Request::Subscribe(args.next().unwrap(), args.next().unwrap())
+                } else {
+                    Request::MissingArgs("channel, password")
+                }
+            }
+            "unsubscribe" => {
+                if pkg.args.len() >= 1 {
+                    let mut args = pkg.args.into_iter();
+                    Request::Unsubscribe(args.next().unwrap())
+                } else {
+                    Request::MissingArgs("channel")
+                }
+            }
+            _ => Request::Unknown(pkg.cmd),
+        }
+    }
 }
