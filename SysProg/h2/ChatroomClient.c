@@ -18,7 +18,7 @@ void *ReadSocket(void *socket);
 
 int main(int argc, const char *argv[]){
   ///CLI Parsing:
-  if(argc != 3){
+  if(argc != 4){
     printf("Pleas give the IP in the -ip option");
     exit(EXIT_FAILURE);
   }
@@ -69,7 +69,6 @@ int main(int argc, const char *argv[]){
   else if(!strncmp(buf, "err\003", sizeof("err\003") - 1)){
     printf("The Server return %d as error", atoi(buf + 4));
   }
-  
   pthread_t myWritingThread, readingThread;
   struct a writeData, readData;
 
@@ -143,6 +142,30 @@ buf2start:
   }
   return NULL;
 }
-void *ReadSocket(void *) {
+void *ReadSocket(void *in) {
+  struct a *input = in;
+  const int maxLen = 20000 + 1;
+  char *buf1 = malloc(maxLen), *buf2 = malloc(maxLen);
+  int len = 0;
 
+  char readBuf[1024];  
+  enum stat{
+    msg,
+  };
+  enum stat stat;
+  for (char i = getc(input->fd); i; i = getchar(input->fd)) {
+    
+  }
+  while (1) {
+
+    int ret = read(input->fd, readBuf, 1023);
+    readBuf[ret] = 0;
+    for (char *i = readBuf; i; ++i) {
+      
+    }
+    if(len + ret + 1024 >= maxLen){
+      
+    }
+
+  }
 }
