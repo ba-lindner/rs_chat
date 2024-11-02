@@ -180,8 +180,11 @@ int GetSocket(const char *ip, int port){
 
   struct sockaddr_in add;
   add.sin_family = AF_INET;
-  inet_aton(ip, &add.sin_addr);
-  add.sin_port = port;
+  add.sin_port = htons(port);
+  if(inet_aton(ip, &add.sin_addr) == 0){
+    std::cerr << "infalid addess" << std::endl;
+    exit(EXIT_FAILURE);
+  }
   if(connect(fd, (const struct sockaddr*) &add, sizeof(struct sockaddr_in))){
     printf("Faild to connect socket. errno: %d", errno);
     exit(EXIT_FAILURE);
