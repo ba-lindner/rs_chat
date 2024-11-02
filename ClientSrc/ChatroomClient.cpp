@@ -30,14 +30,16 @@ int main(int argc, const char *argv[]){
   std::cout << "Pleas enter the ip of the server: ";
   std::string ipStr;
   std::cin >> ipStr;
-  std::cout << "Pleas enter the server Port(standart is 4173): ";
+  std::cout << "Pleas enter the server Port(standart is 6447): ";
   int portNum;
   std::cin >> portNum;
   std::cout << "Pleas enter your name: ";
   std::string name;
   std::cin >> name;
 
+  std::string login = "\002login\026" + name + '\003'; 
   int socket = ::GetSocket(ipStr.c_str(), portNum);
+  write(socket, login.c_str(), login.length());
 
   ///terminal and input buffer settings
   termios stored_settings;
