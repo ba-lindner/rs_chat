@@ -1,0 +1,42 @@
+{
+    "name": "default_bot",
+    "key": "jniurh087",
+    "trigger": {
+        "startup": {
+            "ignore_errors": true,
+            "cmds": [
+                {
+                    "cmd": "new_channel",
+                    "args": [
+                        "printf",
+                        "guenni"
+                    ]
+                }
+            ]
+        },
+        "login": {
+            "ignore_errors": false,
+            "cmds": [
+                {
+                    "cmd": "send",
+                    "args": [
+                        "${name}",
+                        "Welcome back, ${name}!"
+                    ]
+                }
+            ]
+        },
+        "subscribe(printf)": {
+            "ignore_errors": false,
+            "cmds": [
+                {
+                    "cmd": "post",
+                    "args": [
+                        "printf",
+                        "A wild ${name} has appeared!"
+                    ]
+                }
+            ]
+        }
+    }
+}

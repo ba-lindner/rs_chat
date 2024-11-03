@@ -1,39 +1,70 @@
-Message format: STX <command> SYN <args> ETX
-multiple args separated by EM
+Message format: STX <command> SYN [ <args> EM ]* ETX
 
 command list:
-Client -> Server:
-	login <name>
+Client -> Server: (! means a server MUST implement this)
+!	login <name>
 		start of active connection
+!	post <channel> <message>
+		broadcast message
+!	features
+		get list of features provided by server
+		available features:
+			- basic
+			- direct
+			- channels
+			- bots
+			- offenses
 	listen
+		feature: basic
 		start of passive connection
 	ping
+		feature: basic
 		check if server is still available
-	post <channel> EM <message>
-		broadcast message
-	send <name> EM <message>
-		send message only to specific person
 	names <channel>
+		feature: basic
 		get list of client names
 	about
+		feature: basic
 		get some info about server
-	features
-		get list of features provided by server
-	new_channel <channel> EM <password>
+	send <name> <message>
+		feature: direct
+		send message only to specific person
+	block <name>
+		feature: direct
+		block direct messages from user
+	unblock <name>
+		feature: direct
+		unblock direct messages from user
+	new_channel <channel> <password>
+		feature: channels
 		create new channel with password (may be empty)
 		automatically subscribes to newly created channel
 	list_channels
+		feature: channels
 		list available channels
-	subscribe <channel> EM <password>
+	subscribe <channel> <password>
+		feature: channels
 		subscribe to channel
 	unsubscribe <channel>
+		feature: channels
 		unsubscribe from channel
-	add_bot <json [{"cmd": "string", "args": ["string"]}]>
+	add_bot <json>
+		feature: bots
+		add a new bot
+	remove_bot <bot_name> <key>
+		feature: bots
+		remove specified bot
+	offenses
+		feature: offenses
+		find out how often you have offended the server
+	forgive <name>
+		feature: offenses
+		reduce the number of offenses for another user
 
 Server -> Client:
 	ack
 		login ok, ping succeeded
-	msg <channel> EM <name> EM <message>
+	msg <channel> <name> <message>
 		received message from person (both broadcast and direct)
 	err <why>
 		an error has occurred
@@ -45,29 +76,39 @@ responses:
 login
 	ack
 	err
-listen
+listen, ping
 	ack
-ping
-	ack
-post
-	ack
-send
+post, send
 	ack
 	err
 names
-	info [ <name> EM ]*
+	info [ <name> ]*
 about
 	info <some string>
 features
-	info [ <feature> EM ]*
+	info [ <feature> ]*
 new_channel
 	ack
 	err
 list_channels
-	info [ <channel> EM ]*
-subscribe
+	info [ <channel> ]*
+subscribe, unsubscribe
 	ack
 	err
-unsubscribe
+add_bot, remove_bot
 	ack
 	err
+
+Bots:
+- each bot is automatically logged in with its name
+- a bot can have multiple triggers
+- each trigger has a list of commands
+- if a trigger is triggered, the commands are sent to the server
+available triggers: (args can be replaced with '*')
+- startup
+- login -> $name
+- subscribe(channel) -> $name
+- msg(name, msg)
+available variables:
+- syntax: ${..}
+- trigger-specific (including arguments)

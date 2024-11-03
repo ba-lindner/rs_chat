@@ -1,19 +1,27 @@
 use std::{
-    borrow::Borrow, cell::LazyCell, io::{ErrorKind, Read as _, Write as _}, net::TcpStream
+    borrow::Borrow,
+    io::{Error, ErrorKind, Read as _, Write as _},
+    net::{TcpStream, ToSocketAddrs},
+    thread,
+    time::Duration,
 };
 
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Package {
     pub cmd: String,
     pub args: Vec<String>,
 }
 
-impl Package {
-    pub const ACK: LazyCell<Package> = LazyCell::new(|| Package{
+lazy_static::lazy_static! {
+    pub static ref PACKAGE_ACK: Package = Package {
         cmd: "ack".to_string(),
         args: Vec::new(),
-    });
+    };
+}
 
+impl Package {
     pub fn parse(src: &str) -> Option<Self> {
         let inner = src.strip_prefix(PKG_START)?.strip_suffix(PKG_END)?;
         let (cmd, args) = inner.split_once(CMD_END)?;
@@ -39,14 +47,14 @@ impl Package {
         }
     }
 
-    pub fn msg(channel: impl Into<String>, sender: impl Into<String>, msg: impl Into<String>) -> Self {
+    pub fn msg(
+        channel: impl Into<String>,
+        sender: impl Into<String>,
+        msg: impl Into<String>,
+    ) -> Self {
         Self {
             cmd: "msg".to_string(),
-            args: vec![
-                channel.into(),
-                sender.into(),
-                msg.into(),
-            ],
+            args: vec![channel.into(), sender.into(), msg.into()],
         }
     }
 }
@@ -54,25 +62,29 @@ impl Package {
 const BUF_SIZE: usize = 256;
 const PKG_START: &str = "\u{2}"; // STX
 const PKG_END: &str = "\u{3}"; // ETX
-const CMD_END: &str = "\u{22}"; // SYN
-const ARG_END: &str = "\u{25}"; // EM
+const CMD_END: &str = "\u{16}"; // SYN
+const ARG_END: &str = "\u{19}"; // EM
 
 pub struct Connection {
     stream: TcpStream,
-    buffer: [u8; BUF_SIZE],
+    buffer: Box<[u8; BUF_SIZE]>,
     pkg_part: String,
     alive: bool,
 }
 
 impl Connection {
-    pub fn new(stream: TcpStream) -> Option<Self> {
-        stream.set_nonblocking(true).ok()?;
-        Some(Self {
+    pub fn new(stream: TcpStream) -> Result<Self, Error> {
+        stream.set_nonblocking(true)?;
+        Ok(Self {
             stream,
-            buffer: [0; BUF_SIZE],
+            buffer: Box::new([0; BUF_SIZE]),
             pkg_part: String::new(),
             alive: true,
         })
+    }
+
+    pub fn to(addr: impl ToSocketAddrs) -> Result<Self, Error> {
+        Self::new(TcpStream::connect(addr)?)
     }
 
     pub fn alive(&self) -> bool {
@@ -80,6 +92,9 @@ impl Connection {
     }
 
     pub fn send_package(&mut self, pkg: impl Borrow<Package>) {
+        if cfg!(debug_assertions) {
+            println!("> {:?}", pkg.borrow());
+        }
         if !self.alive {
             return;
         }
@@ -97,7 +112,7 @@ impl Connection {
         }
         let mut read_bytes = BUF_SIZE;
         while read_bytes == BUF_SIZE {
-            read_bytes = match self.stream.read(&mut self.buffer) {
+            read_bytes = match self.stream.read(&mut *self.buffer) {
                 Ok(bytes) => bytes,
                 Err(why) => {
                     if why.kind() != ErrorKind::WouldBlock {
@@ -117,7 +132,20 @@ impl Connection {
             let (curr, next) = self.pkg_part.split_at(idx + 1);
             let ret = Package::parse(curr);
             self.pkg_part = String::from(next);
+            if cfg!(debug_assertions) {
+                ret.as_ref().inspect(|pkg| println!("< {pkg:?}"));
+            }
             return ret;
+        }
+        None
+    }
+
+    pub fn wait_package(&mut self) -> Option<Package> {
+        while self.alive {
+            if let Some(pkg) = self.get_package() {
+                return Some(pkg);
+            }
+            thread::sleep(Duration::from_millis(5));
         }
         None
     }
