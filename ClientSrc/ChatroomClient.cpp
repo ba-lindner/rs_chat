@@ -37,9 +37,12 @@ int main(int argc, const char *argv[]){
   std::string name;
   std::cin >> name;
 
-  std::string login = "\002login\026" + name + '\003'; 
+  std::string login = "\002login\026" + name + "\031\003"; 
   int socket = ::GetSocket(ipStr.c_str(), portNum);
   write(socket, login.c_str(), login.length());
+  while (1) {
+    std::cout << ::read(socket, (void*)login.c_str(), login.length()) << " " << login << std::endl;
+  }
 
   ///terminal and input buffer settings
   termios stored_settings;
