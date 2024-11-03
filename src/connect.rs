@@ -62,8 +62,8 @@ impl Package {
 const BUF_SIZE: usize = 256;
 const PKG_START: &str = "\u{2}"; // STX
 const PKG_END: &str = "\u{3}"; // ETX
-const CMD_END: &str = "\u{22}"; // SYN
-const ARG_END: &str = "\u{25}"; // EM
+const CMD_END: &str = "\u{16}"; // SYN
+const ARG_END: &str = "\u{19}"; // EM
 
 pub struct Connection {
     stream: TcpStream,
