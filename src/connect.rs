@@ -98,11 +98,9 @@ impl Connection {
         if !self.alive {
             return;
         }
-        for part in pkg.borrow().parts() {
-            if self.stream.write_all(part.as_bytes()).is_err() {
-                self.alive = false;
-                return;
-            }
+        let full_pkg: String = pkg.borrow().parts().collect();
+        if self.stream.write_all(full_pkg.as_bytes()).is_err() {
+            self.alive = false;
         }
     }
 

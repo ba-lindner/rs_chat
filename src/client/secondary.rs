@@ -1,17 +1,37 @@
 use std::io::{stdin, stdout, Write};
 
-use crate::{client::inp_to_package, response::Response, Connection};
+use crate::{client::inp_to_package, response::Response, Connection, Request};
 
 use super::ClientErr;
 
+/*
+<msg> -> post "" <msg>
+@<name> <msg> -> send <name> <msg>
+/<channel> <msg> -> post <channel> <msg>
+
+? -> this help
+:? -> about + features
+:q -> !quit
+:w <channel>? -> names <channel>?
+:c -> list_channels (also show joined ones)
+:c <channel> <passwd>? -> new_channel / subscribe / unsubscribe
+:b <name> -> (un)block
+:o -> offenses
+:f <name> -> forgive <name>
+*/
+
 pub struct SecondaryClient {
     conn: Connection,
+    channels: Vec<String>,
+    blocked: Vec<String>,
 }
 
 impl SecondaryClient {
     pub fn connect(port: u16) -> Result<Self, ClientErr> {
         Ok(Self {
             conn: Connection::to(("127.0.0.1", port))?,
+            channels: Vec::new(),
+            blocked: Vec::new(),
         })
     }
 
@@ -32,6 +52,10 @@ impl SecondaryClient {
                 Err(why) => eprintln!("server sent invalid response: {why:?}"),
             }
         }
+    }
+
+    fn parse_input(&self, inp: &str) -> Request {
+        todo!()
     }
 
     fn print_answer(answer: Response) {

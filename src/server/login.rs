@@ -1,8 +1,8 @@
 use std::{io::Error, net::TcpListener, sync::mpsc::Sender, thread, time::Duration};
 
-use crate::{Connection, Package, SERVER_PORT};
+use crate::{Connection, Package, SERVER_PORT, Request};
 
-use super::{requests::Request, Client};
+use super::Client;
 
 const MAX_AGE: u32 = 20;
 

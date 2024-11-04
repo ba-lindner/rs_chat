@@ -4,11 +4,8 @@ use std::{
 
 //mod bot;
 mod login;
-mod requests;
 
-use requests::Request;
-
-use crate::{connect::PACKAGE_ACK, response::Response, Connection, Package};
+use crate::{connect::PACKAGE_ACK, Request, Response, Connection, Package};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "";
 pub const DIRECT_CHANNEL_NAME: &str = "__direct";
@@ -98,6 +95,7 @@ impl Server {
     }
 
     pub fn run(&mut self) -> ! {
+        println!("{}", Self::ABOUT);
         loop {
             self.collect_new_clients();
             for (client, req) in self.collect_requests() {
