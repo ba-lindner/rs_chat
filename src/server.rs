@@ -5,7 +5,7 @@ use std::{
 //mod bot;
 mod login;
 
-use crate::{connect::PACKAGE_ACK, Request, Response, Connection, Package};
+use crate::{Request, Response, Connection, Package};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "";
 pub const DIRECT_CHANNEL_NAME: &str = "__direct";
@@ -29,14 +29,12 @@ impl Client {
     }
 
     pub fn should_remain(&self) -> bool {
-        if cfg!(debug_assertions) {
-            if let Some(name) = &self.name {
-                if self.offenses >= MAX_OFFENSES {
-                    println!("{name} was kicked");
-                }
-                if !self.conn.alive() {
-                    println!("{name} left");
-                }
+        if let Some(name) = &self.name {
+            if self.offenses >= MAX_OFFENSES {
+                println!("{name} was kicked");
+            }
+            if !self.conn.alive() {
+                println!("{name} left");
             }
         }
         self.conn.alive() && self.offenses < MAX_OFFENSES
@@ -122,10 +120,8 @@ impl Server {
                         .send_package(Package::err("name already used"));
                 } else {
                     let name = name.clone();
-                    if cfg!(debug_assertions) {
-                        println!("{name} has joined");
-                    }
-                    new_client.conn.send_package(&*PACKAGE_ACK);
+                    println!("{name} has joined");
+                    new_client.conn.send_package(Response::Ack.into_package());
                     self.active_clients.insert(name.clone(), new_client);
                     self.channels
                         .get_mut(GLOBAL_CHANNEL_NAME)
@@ -134,7 +130,7 @@ impl Server {
                         .push(name);
                 }
             } else {
-                new_client.conn.send_package(&*PACKAGE_ACK);
+                new_client.conn.send_package(Response::Ack.into_package());
                 self.passive_clients.push(new_client);
             }
         }
@@ -198,7 +194,7 @@ impl Server {
             }
             Request::ListChannels => Response::info(self.channels.keys()),
             Request::Subscribe(channel, passwd) => {
-                let chan = self.get_channel(client, &channel)?;
+                let chan = self.channels.get_mut(&channel).ok_or(Response::err("channel doesn't exist"))?;
                 if chan.password == passwd {
                     chan.members.push(client.clone());
                     Response::Ack
@@ -227,7 +223,7 @@ impl Server {
                     Response::err("user wasn't blocked")
                 }
             }
-            Request::Offenses => Response::info([self.get_client(client)?.offenses.to_string()]),
+            Request::Offenses => Response::info([self.get_client(client)?.offenses.to_string(), MAX_OFFENSES.to_string()]),
             Request::Pardon(name) => {
                 let cl = self.get_client(&name)?;
                 if cl.offenses > 0 {

@@ -14,13 +14,6 @@ pub struct Package {
     pub args: Vec<String>,
 }
 
-lazy_static::lazy_static! {
-    pub static ref PACKAGE_ACK: Package = Package {
-        cmd: "ack".to_string(),
-        args: Vec::new(),
-    };
-}
-
 impl Package {
     pub fn parse(src: &str) -> Option<Self> {
         let inner = src.strip_prefix(PKG_START)?.strip_suffix(PKG_END)?;
@@ -60,10 +53,10 @@ impl Package {
 }
 
 const BUF_SIZE: usize = 256;
-const PKG_START: &str = "\u{2}"; // STX
-const PKG_END: &str = "\u{3}"; // ETX
-const CMD_END: &str = "\u{16}"; // SYN
-const ARG_END: &str = "\u{19}"; // EM
+const PKG_START: &str = "\x02"; // STX
+const PKG_END: &str = "\x03"; // ETX
+const CMD_END: &str = "\x16"; // SYN
+const ARG_END: &str = "\x19"; // EM
 
 pub struct Connection {
     stream: TcpStream,

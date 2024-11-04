@@ -1,6 +1,10 @@
 use std::{net::TcpListener, thread, time::Duration};
 
-use crate::{response::Response, server::{GLOBAL_CHANNEL_NAME, DIRECT_CHANNEL_NAME}, Connection, Package};
+use crate::{
+    response::Response,
+    server::{DIRECT_CHANNEL_NAME, GLOBAL_CHANNEL_NAME},
+    Connection, Package,
+};
 
 use super::ClientErr;
 
@@ -26,14 +30,14 @@ impl PrimaryClient {
 
     pub fn run(&mut self) {
         loop {
-            if let Some(conn) = &mut self.secondary {
-                if let Some(incoming) = self.server.get_package() {
-                    if &incoming.cmd == "msg" {
-                        Self::print_message(incoming);
-                    } else {
-                        conn.send_package(incoming);
-                    }
+            if let Some(incoming) = self.server.get_package() {
+                if &incoming.cmd == "msg" {
+                    Self::print_message(incoming);
+                } else if let Some(conn) = &mut self.secondary {
+                    conn.send_package(incoming);
                 }
+            }
+            if let Some(conn) = &mut self.secondary {
                 if let Some(outgoing) = conn.get_package() {
                     self.server.send_package(outgoing);
                 }
