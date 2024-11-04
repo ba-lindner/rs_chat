@@ -6,12 +6,15 @@ use crate::{
     Connection, Package,
 };
 
-use super::ClientErr;
+use super::{ClientErr, InterClientComm};
 
 pub struct PrimaryClient {
     server: Connection,
     listener: TcpListener,
     secondary: Option<Connection>,
+    name: String,
+    channels: Vec<String>,
+    blocked: Vec<String>,
 }
 
 impl PrimaryClient {
@@ -25,6 +28,9 @@ impl PrimaryClient {
             server,
             listener,
             secondary: None,
+            name: name.to_string(),
+            channels: vec![String::new()],
+            blocked: Vec::new(),
         })
     }
 
@@ -39,13 +45,28 @@ impl PrimaryClient {
             }
             if let Some(conn) = &mut self.secondary {
                 if let Some(outgoing) = conn.get_package() {
-                    self.server.send_package(outgoing);
+                    if outgoing.cmd.starts_with(':') {
+                        match outgoing.try_into() {
+                            Ok(InterClientComm::Channels(ch)) => self.channels = ch,
+                            Ok(InterClientComm::Blocked(bl)) => self.blocked = bl,
+                            Ok(InterClientComm::Quit) => {
+                                println!("terminated by user");
+                                return;
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        self.server.send_package(outgoing);
+                    }
                 }
                 if !conn.alive() {
                     self.secondary.take();
                 }
             } else if let Ok((stream, _)) = self.listener.accept() {
-                if let Ok(conn) = Connection::new(stream) {
+                if let Ok(mut conn) = Connection::new(stream) {
+                    conn.send_package(InterClientComm::Name(self.name.clone()).into_package());
+                    conn.send_package(InterClientComm::Channels(self.channels.clone()).into_package());
+                    conn.send_package(InterClientComm::Blocked(self.blocked.clone()).into_package());
                     self.secondary = Some(conn);
                 }
             }

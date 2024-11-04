@@ -6,7 +6,7 @@ use std::{
 
 use crate::{move_vec, response::Response, Connection, Request, ResponseError};
 
-use super::ClientErr;
+use super::{ClientErr, InterClientComm};
 
 /*
 <msg> -> post "" <msg>
@@ -63,7 +63,8 @@ Note: you must first join a channel via ':c' to post a message there";
 
 const HELP_SERVER: &str = ":s - get server information";
 const HELP_QUIT: &str = ":q - quit this program
-Note: you will still be able to read messages in your primary client and thus stay logged in";
+Use :q! to also close the primary client
+Note: unless you use :q!, you will stay logged in in your primary client and thus be able to read messages";
 
 const HELP_WHO: &str = ":w - find out who is online
 Usage: :w [<channel>]
@@ -98,7 +99,7 @@ enum UserCmd {
     ChannelMsg(String, String),
     Help(Option<char>),
     ServerInfo,
-    Quit,
+    Quit(bool),
     Who(String),
     ChannelList,
     ChannelJoinNew(String, String),
@@ -107,6 +108,7 @@ enum UserCmd {
     Block(String),
     Offenses,
     Pardon(String),
+    SecretHelp,
 }
 
 enum Happenings {
@@ -125,16 +127,40 @@ impl From<ResponseError> for Happenings {
 
 pub struct SecondaryClient {
     conn: Connection,
+    name: String,
     channels: Vec<String>,
     blocked: Vec<String>,
 }
 
 impl SecondaryClient {
     pub fn connect(port: u16) -> Result<Self, ClientErr> {
+        let mut conn = Connection::to(("127.0.0.1", port))?;
+        let Ok(InterClientComm::Name(name)) = conn
+            .wait_package()
+            .ok_or(ClientErr::StartupFailed)?
+            .try_into()
+        else {
+            return Err(ClientErr::StartupFailed);
+        };
+        let Ok(InterClientComm::Channels(channels)) = conn
+            .wait_package()
+            .ok_or(ClientErr::StartupFailed)?
+            .try_into()
+        else {
+            return Err(ClientErr::StartupFailed);
+        };
+        let Ok(InterClientComm::Blocked(blocked)) = conn
+            .wait_package()
+            .ok_or(ClientErr::StartupFailed)?
+            .try_into()
+        else {
+            return Err(ClientErr::StartupFailed);
+        };
         Ok(Self {
-            conn: Connection::to(("127.0.0.1", port))?,
-            channels: vec![String::new()],
-            blocked: Vec::new(),
+            conn,
+            name,
+            channels,
+            blocked,
         })
     }
 
@@ -163,7 +189,11 @@ impl SecondaryClient {
     }
 
     fn parse_input(inp: &str) -> Option<UserCmd> {
-        let trimmed = inp[1..].trim_start();
+        let trimmed = if inp.is_empty() {
+            inp
+        } else {
+            inp[1..].trim_start()
+        };
         Some(match inp.chars().next()? {
             '@' => {
                 let Some((name, msg)) = trimmed.split_once(char::is_whitespace) else {
@@ -192,15 +222,12 @@ impl SecondaryClient {
         } else {
             (inp, Vec::new())
         };
-        let Some(cmd) = cmd.chars().next() else {
-            eprintln!("empty command");
-            return None;
-        };
         Some(match cmd {
-            's' => UserCmd::ServerInfo,
-            'q' => UserCmd::Quit,
-            'w' => UserCmd::Who(args.first().map(|a| a.to_string()).unwrap_or_default()),
-            'c' => {
+            "s" => UserCmd::ServerInfo,
+            "q" => UserCmd::Quit(false),
+            "q!" => UserCmd::Quit(true),
+            "w" => UserCmd::Who(args.first().map(|a| a.to_string()).unwrap_or_default()),
+            "c" => {
                 if let Some(channel) = args.first() {
                     if let Some(channel) = channel.strip_prefix('-') {
                         UserCmd::ChannelLeave(channel.to_string())
@@ -215,15 +242,15 @@ impl SecondaryClient {
                     UserCmd::ChannelList
                 }
             }
-            'b' => {
+            "b" => {
                 if let Some(name) = args.first() {
                     UserCmd::Block(name.to_string())
                 } else {
                     UserCmd::BlockList
                 }
             }
-            'o' => UserCmd::Offenses,
-            'p' => {
+            "o" => UserCmd::Offenses,
+            "p" => {
                 if let Some(arg) = args.first() {
                     UserCmd::Pardon(arg.to_string())
                 } else {
@@ -231,6 +258,7 @@ impl SecondaryClient {
                     return None;
                 }
             }
+            "?!" => UserCmd::SecretHelp,
             _ => {
                 eprintln!("unknown command {cmd}");
                 return None;
@@ -260,24 +288,30 @@ impl SecondaryClient {
                 };
                 println!("{help_txt}");
             }
+            UserCmd::SecretHelp => println!("visit https://github.com/ba-lindner/rs_chat for more help"),
             UserCmd::BlockList => println!("you have currently blocked: {}", Disp(&self.blocked)),
-            UserCmd::Quit => return Err(Happenings::QuitCmd),
-            UserCmd::ChannelList => {
-                for (idx, chan) in self
-                    .info_request(Request::ListChannels)?
-                    .into_iter()
-                    .enumerate()
-                {
-                    if idx != 0 {
-                        print!(", ");
-                    }
-                    if self.channels.contains(&chan) {
-                        print!("(*) ");
-                    }
-                    print!("{}", channel_name(&chan))
+            UserCmd::Quit(force) => {
+                if force {
+                    self.conn.send_package(InterClientComm::Quit.into_package());
                 }
-                println!();
+                return Err(Happenings::QuitCmd);
             }
+            UserCmd::ChannelList => println!(
+                "channels: {}",
+                Disp(
+                    &self
+                        .info_request(Request::ListChannels)?
+                        .into_iter()
+                        .map(|c| {
+                            if self.channels.contains(&c) {
+                                format!("(*) {}", channel_name(&c))
+                            } else {
+                                format!("{}", channel_name(&c))
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                )
+            ),
             UserCmd::ServerInfo => {
                 println!(
                     "server: {}",
@@ -315,12 +349,18 @@ impl SecondaryClient {
             }
             UserCmd::DirectMsg(name, msg) => {
                 if let Some(name) = self.check_user(name)? {
-                    self.ack_request(Request::Send(name, msg))?;
+                    if self.blocked.contains(&name) {
+                        eprintln!("you blocked {name}");
+                    } else {
+                        self.ack_request(Request::Send(name, msg))?;
+                    }
                 }
             }
             UserCmd::Block(name) => {
                 if let Some(name) = self.check_user(name)? {
-                    if self.blocked.contains(&name) {
+                    if name == self.name {
+                        eprintln!("don't block yourself :(");
+                    } else if self.blocked.contains(&name) {
                         self.ack_request(Request::Unblock(name.clone()))?;
                         self.blocked.retain(|n| *n != name);
                         println!("unblocked {name}");
@@ -329,10 +369,15 @@ impl SecondaryClient {
                         println!("blocked {name}");
                         self.blocked.push(name);
                     }
+                    self.conn.send_package(
+                        InterClientComm::Blocked(self.blocked.clone()).into_package(),
+                    );
                 }
             }
             UserCmd::Pardon(name) => {
-                if let Some(name) = self.check_user(name)? {
+                if name == self.name {
+                    eprintln!("can't pardon yourself");
+                } else if let Some(name) = self.check_user(name)? {
                     self.ack_request(Request::Pardon(name.clone()))?;
                     println!("pardoned {name}")
                 }
@@ -341,7 +386,10 @@ impl SecondaryClient {
                 if self.channels.contains(&channel) {
                     self.ack_request(Request::Unsubscribe(channel.clone()))?;
                     self.channels.retain(|c| *c != channel);
-                    println!("left {}", channel_name(&channel))
+                    println!("left {}", channel_name(&channel));
+                    self.conn.send_package(
+                        InterClientComm::Channels(self.channels.clone()).into_package(),
+                    );
                 } else {
                     eprintln!("you didn't join {}", channel_name(&channel));
                 }
@@ -353,12 +401,13 @@ impl SecondaryClient {
                 if self.info_request(Request::ListChannels)?.contains(&channel) {
                     self.ack_request(Request::Subscribe(channel.clone(), passwd))?;
                     println!("joined {}", channel_name(&channel));
-                    self.channels.push(channel);
                 } else {
                     self.ack_request(Request::NewChannel(channel.clone(), passwd))?;
                     println!("created {}", channel_name(&channel));
-                    self.channels.push(channel);
                 }
+                self.channels.push(channel);
+                self.conn
+                    .send_package(InterClientComm::Channels(self.channels.clone()).into_package());
             }
         }
         Ok(())
