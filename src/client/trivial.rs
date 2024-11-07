@@ -1,6 +1,11 @@
-use std::{io::stdin, sync::mpsc::{channel, Sender}, thread, time::Duration};
+use std::{
+    io::stdin,
+    sync::mpsc::{channel, Sender},
+    thread,
+    time::Duration,
+};
 
-use crate::{Connection, Package};
+use crate::connect::{Connection, Package};
 
 use super::{server_connection, ClientErr};
 

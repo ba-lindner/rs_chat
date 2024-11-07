@@ -4,7 +4,10 @@ use std::{
     io::{stdin, stdout, Write},
 };
 
-use crate::{move_vec, response::Response, Connection, Request, ResponseError};
+use crate::{
+    connect::Connection, connect::PackageParseError, move_vec, requests::Request,
+    response::Response,
+};
 
 use super::{ClientErr, InterClientComm};
 
@@ -95,7 +98,7 @@ If this player did not have any offenses, it will be counted as an offense by yo
 A name check analog to direct messages will be performed.";
 
 /// Things a user might want to do
-/// 
+///
 /// In most cases, this translates to one [`Request`].
 /// However, there may be additional requests
 /// prior to the main one or none at all.
@@ -117,26 +120,26 @@ enum UserCmd {
 }
 
 /// Unexpected things that can occur
-/// 
+///
 /// This is either an error or a signal that the user
 /// decided to quit the client. An error may be significant
-/// enough to cause the client to stop, but is not required to do so. 
+/// enough to cause the client to stop, but is not required to do so.
 enum Happenings {
-    ResponseErr(ResponseError),
+    ResponseErr(PackageParseError),
     OwnMistake(String),
     ProtocolViolation,
     ServerDied,
     QuitCmd,
 }
 
-impl From<ResponseError> for Happenings {
-    fn from(value: ResponseError) -> Self {
+impl From<PackageParseError> for Happenings {
+    fn from(value: PackageParseError) -> Self {
         Self::ResponseErr(value)
     }
 }
 
 /// A secondary client, used to write messages and send commands
-/// 
+///
 /// Secondary clients require a primary client
 /// and can thus only be created with [`connect`](Self::connect).
 /// It keeps track of its own name aswell as joined channels and blocked users
@@ -149,7 +152,7 @@ pub struct SecondaryClient {
 
 impl SecondaryClient {
     /// Connect to a primary client
-    /// 
+    ///
     /// Requires the primary client to send the metadata upon connection
     /// (see [`InterClientComm`])
     pub fn connect(port: u16) -> Result<Self, ClientErr> {
@@ -191,7 +194,7 @@ impl SecondaryClient {
                 if let Err(why) = self.exec_cmd(cmd) {
                     match why {
                         Happenings::ResponseErr(err) => {
-                            eprintln!("server sent invalid response: {err:?}")
+                            eprintln!("server sent invalid response: {err}")
                         }
                         Happenings::ProtocolViolation => eprintln!("server violated the protocol"),
                         Happenings::ServerDied => eprintln!("server died. oh no."),
@@ -251,7 +254,7 @@ impl SecondaryClient {
                     if let Some(channel) = channel.strip_prefix('-') {
                         UserCmd::ChannelLeave(channel.to_string())
                     } else {
-                        let chan = channel.strip_prefix("+").unwrap_or(channel).to_string();
+                        let chan = channel.strip_prefix('+').unwrap_or(channel).to_string();
                         UserCmd::ChannelJoinNew(
                             chan,
                             args.get(1).map(|a| a.to_string()).unwrap_or_default(),
@@ -307,11 +310,13 @@ impl SecondaryClient {
                 };
                 println!("{help_txt}");
             }
-            UserCmd::SecretHelp => println!("visit https://github.com/ba-lindner/rs_chat for more help"),
+            UserCmd::SecretHelp => {
+                println!("visit https://github.com/ba-lindner/rs_chat for more help")
+            }
             UserCmd::BlockList => println!("you have currently blocked: {}", Disp(&self.blocked)),
             UserCmd::Quit(force) => {
                 if force {
-                    self.conn.send_package(InterClientComm::Quit.into_package());
+                    self.conn.send_package(InterClientComm::Quit.package());
                 }
                 return Err(Happenings::QuitCmd);
             }
@@ -325,7 +330,7 @@ impl SecondaryClient {
                             if self.channels.contains(&c) {
                                 format!("(*) {}", channel_name(&c))
                             } else {
-                                format!("{}", channel_name(&c))
+                                channel_name(&c).to_string()
                             }
                         })
                         .collect::<Vec<_>>()
@@ -335,7 +340,7 @@ impl SecondaryClient {
                 println!(
                     "server: {}",
                     self.info_request(Request::About)?
-                        .get(0)
+                        .first()
                         .ok_or(Happenings::ProtocolViolation)?
                 );
                 println!(
@@ -388,9 +393,8 @@ impl SecondaryClient {
                         println!("blocked {name}");
                         self.blocked.push(name);
                     }
-                    self.conn.send_package(
-                        InterClientComm::Blocked(self.blocked.clone()).into_package(),
-                    );
+                    self.conn
+                        .send_package(InterClientComm::Blocked(self.blocked.clone()).package());
                 }
             }
             UserCmd::Pardon(name) => {
@@ -406,9 +410,8 @@ impl SecondaryClient {
                     self.ack_request(Request::Unsubscribe(channel.clone()))?;
                     self.channels.retain(|c| *c != channel);
                     println!("left {}", channel_name(&channel));
-                    self.conn.send_package(
-                        InterClientComm::Channels(self.channels.clone()).into_package(),
-                    );
+                    self.conn
+                        .send_package(InterClientComm::Channels(self.channels.clone()).package());
                 } else {
                     eprintln!("you didn't join {}", channel_name(&channel));
                 }
@@ -426,7 +429,7 @@ impl SecondaryClient {
                 }
                 self.channels.push(channel);
                 self.conn
-                    .send_package(InterClientComm::Channels(self.channels.clone()).into_package());
+                    .send_package(InterClientComm::Channels(self.channels.clone()).package());
             }
         }
         Ok(())
@@ -474,7 +477,7 @@ impl SecondaryClient {
     }
 
     fn info_request(&mut self, req: Request) -> Result<Vec<String>, Happenings> {
-        self.conn.send_package(req.to_package());
+        self.conn.send_package(req.package());
         let pkg = self.conn.wait_package().ok_or(Happenings::ServerDied)?;
         match pkg.try_into()? {
             Response::Info(data) => Ok(data),
@@ -484,7 +487,7 @@ impl SecondaryClient {
     }
 
     fn ack_request(&mut self, req: Request) -> Result<(), Happenings> {
-        self.conn.send_package(req.to_package());
+        self.conn.send_package(req.package());
         let pkg = self.conn.wait_package().ok_or(Happenings::ServerDied)?;
         match pkg.try_into()? {
             Response::Ack => Ok(()),

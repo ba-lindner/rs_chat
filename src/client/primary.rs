@@ -1,9 +1,9 @@
 use std::{net::TcpListener, thread, time::Duration};
 
 use crate::{
+    connect::{Connection, Package},
     response::Response,
     server::{DIRECT_CHANNEL_NAME, GLOBAL_CHANNEL_NAME},
-    Connection, Package,
 };
 
 use super::{ClientErr, InterClientComm};
@@ -47,8 +47,8 @@ impl PrimaryClient {
                 if let Some(outgoing) = conn.get_package() {
                     if outgoing.cmd.starts_with(':') {
                         match outgoing.try_into() {
-                            Ok(InterClientComm::Channels(ch)) => self.channels = ch,
-                            Ok(InterClientComm::Blocked(bl)) => self.blocked = bl,
+                            Ok(InterClientComm::Channels(channels)) => self.channels = channels,
+                            Ok(InterClientComm::Blocked(blocked)) => self.blocked = blocked,
                             Ok(InterClientComm::Quit) => {
                                 println!("terminated by user");
                                 return;
@@ -64,9 +64,9 @@ impl PrimaryClient {
                 }
             } else if let Ok((stream, _)) = self.listener.accept() {
                 if let Ok(mut conn) = Connection::new(stream) {
-                    conn.send_package(InterClientComm::Name(self.name.clone()).into_package());
-                    conn.send_package(InterClientComm::Channels(self.channels.clone()).into_package());
-                    conn.send_package(InterClientComm::Blocked(self.blocked.clone()).into_package());
+                    conn.send_package(InterClientComm::Name(self.name.clone()).package());
+                    conn.send_package(InterClientComm::Channels(self.channels.clone()).package());
+                    conn.send_package(InterClientComm::Blocked(self.blocked.clone()).package());
                     self.secondary = Some(conn);
                 }
             }

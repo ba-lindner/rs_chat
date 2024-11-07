@@ -15,7 +15,7 @@ enum Commands {
     /// Start the primary client
     Read {
         /// connection string
-        /// 
+        ///
         /// must be in the format `name@address`,
         /// e.g. `me@localhost`
         conn: String,
@@ -29,7 +29,7 @@ enum Commands {
     Test {
         /// connection string
         conn: String,
-    }
+    },
 }
 
 fn main() {
@@ -43,7 +43,7 @@ fn main() {
         Commands::Test { conn } => {
             let (name, addr) = conn_str(&conn);
             TrivialClient::connect(addr, name).unwrap().run();
-        },
+        }
     }
 }
 

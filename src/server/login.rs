@@ -1,6 +1,6 @@
 use std::{io::Error, net::TcpListener, sync::mpsc::Sender, thread, time::Duration};
 
-use crate::{Connection, Package, SERVER_PORT, Request};
+use crate::{connect::Connection, requests::Request, response::Response, SERVER_PORT};
 
 use super::Client;
 
@@ -35,10 +35,10 @@ pub fn login_thread(tx: Sender<Client>) -> Result<(), Error> {
 
 fn try_login(conn: &mut Connection) -> Result<Option<String>, ()> {
     if let Some(pkg) = conn.get_package() {
-        match Request::parse(pkg) {
+        match pkg.try_into() {
             Ok(Request::Login(name)) => {
                 if name.is_empty() {
-                    conn.send_package(Package::err("please provide a name"));
+                    conn.send_package(Response::err("please provide a name").package());
                 } else {
                     return Ok(Some(name));
                 }
@@ -47,7 +47,7 @@ fn try_login(conn: &mut Connection) -> Result<Option<String>, ()> {
                 return Ok(None);
             }
             _ => {
-                conn.send_package(Package::err("please login first"));
+                conn.send_package(Response::err("please login first").package());
             }
         }
     }

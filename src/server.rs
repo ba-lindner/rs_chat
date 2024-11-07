@@ -1,11 +1,19 @@
 use std::{
-    collections::{HashMap, HashSet}, io::Error, sync::mpsc::{self, Receiver}, thread, time::Duration
+    collections::{HashMap, HashSet},
+    io::Error,
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::Duration,
 };
 
 //mod bot;
 mod login;
 
-use crate::{Request, Response, Connection, Package};
+use crate::{
+    connect::{Connection, Package},
+    requests::Request,
+    response::Response,
+};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "";
 pub const DIRECT_CHANNEL_NAME: &str = "__direct";
@@ -61,7 +69,7 @@ impl Channel {
 
     pub fn append_msg(&mut self, from: String, msg: String) {
         self.msg_queue
-            .push(Package::msg(self.name.clone(), from, msg));
+            .push(Response::msg(self.name.clone(), from, msg).package());
     }
 }
 
@@ -102,7 +110,7 @@ impl Server {
                     if resp.is_bad() {
                         client.offenses += 1;
                     }
-                    client.conn.send_package(resp.into_package());
+                    client.conn.send_package(resp.package());
                 }
             }
             self.send_queues();
@@ -117,11 +125,11 @@ impl Server {
                 if self.active_clients.contains_key(name) {
                     new_client
                         .conn
-                        .send_package(Package::err("name already used"));
+                        .send_package(Response::err("name already used").package());
                 } else {
                     let name = name.clone();
                     println!("{name} has joined");
-                    new_client.conn.send_package(Response::Ack.into_package());
+                    new_client.conn.send_package(Response::Ack.package());
                     self.active_clients.insert(name.clone(), new_client);
                     self.channels
                         .get_mut(GLOBAL_CHANNEL_NAME)
@@ -130,7 +138,7 @@ impl Server {
                         .push(name);
                 }
             } else {
-                new_client.conn.send_package(Response::Ack.into_package());
+                new_client.conn.send_package(Response::Ack.package());
                 self.passive_clients.push(new_client);
             }
         }
@@ -144,7 +152,7 @@ impl Server {
                     Ok(req) => collected.push((name.clone(), req)),
                     Err(why) => {
                         client.offenses += 1;
-                        client.conn.send_package(why.get_package())
+                        client.conn.send_package(why.package())
                     }
                 }
             }
@@ -169,11 +177,9 @@ impl Server {
                     if cl.blocked.contains(client) {
                         Response::err("you were blocked by user")
                     } else {
-                        cl.conn.send_package(Package::msg(
-                            DIRECT_CHANNEL_NAME,
-                            client.clone(),
-                            msg,
-                        ));
+                        cl.conn.send_package(
+                            Response::msg(DIRECT_CHANNEL_NAME, client.clone(), msg).package(),
+                        );
                         Response::Ack
                     }
                 }
@@ -194,7 +200,10 @@ impl Server {
             }
             Request::ListChannels => Response::info(self.channels.keys()),
             Request::Subscribe(channel, passwd) => {
-                let chan = self.channels.get_mut(&channel).ok_or(Response::err("channel doesn't exist"))?;
+                let chan = self
+                    .channels
+                    .get_mut(&channel)
+                    .ok_or(Response::err("channel doesn't exist"))?;
                 if chan.password == passwd {
                     chan.members.push(client.clone());
                     Response::Ack
@@ -223,7 +232,10 @@ impl Server {
                     Response::err("user wasn't blocked")
                 }
             }
-            Request::Offenses => Response::info([self.get_client(client)?.offenses.to_string(), MAX_OFFENSES.to_string()]),
+            Request::Offenses => Response::info([
+                self.get_client(client)?.offenses.to_string(),
+                MAX_OFFENSES.to_string(),
+            ]),
             Request::Pardon(name) => {
                 let cl = self.get_client(&name)?;
                 if cl.offenses > 0 {

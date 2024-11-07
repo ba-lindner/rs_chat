@@ -1,5 +1,6 @@
 use std::{
     borrow::Borrow,
+    fmt::Display,
     io::{Error, ErrorKind, Read as _, Write as _},
     net::{TcpStream, ToSocketAddrs},
     thread,
@@ -8,17 +9,24 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Package {
     pub cmd: String,
     pub args: Vec<String>,
 }
 
 impl Package {
+    const PKG_START: &'static str = "\x02"; // STX
+    const CMD_END: &'static str = "\x16"; // SYN
+    const ARG_END: &'static str = "\x19"; // EM
+    const PKG_END: &'static str = "\x03"; // ETX
+
     pub fn parse(src: &str) -> Option<Self> {
-        let inner = src.strip_prefix(PKG_START)?.strip_suffix(PKG_END)?;
-        let (cmd, args) = inner.split_once(CMD_END)?;
-        let mut args: Vec<_> = args.split(ARG_END).map(String::from).collect();
+        let inner = src
+            .strip_prefix(Self::PKG_START)?
+            .strip_suffix(Self::PKG_END)?;
+        let (cmd, args) = inner.split_once(Self::CMD_END)?;
+        let mut args: Vec<_> = args.split(Self::ARG_END).map(String::from).collect();
         args.pop();
         Some(Self {
             cmd: cmd.to_string(),
@@ -27,36 +35,129 @@ impl Package {
     }
 
     pub fn parts(&self) -> impl Iterator<Item = &str> {
-        [PKG_START, &self.cmd, CMD_END]
+        [Self::PKG_START, &self.cmd, Self::CMD_END]
             .into_iter()
-            .chain(self.args.iter().flat_map(|a| [a, ARG_END]))
-            .chain([PKG_END])
+            .chain(self.args.iter().flat_map(|a| [a, Self::ARG_END]))
+            .chain([Self::PKG_END])
     }
+}
 
-    pub fn err(msg: impl Into<String>) -> Self {
-        Self {
-            cmd: "err".to_string(),
-            args: vec![msg.into()],
+#[derive(Debug)]
+pub enum PackageParseError {
+    UnknownCmd(String),
+    MissingArgs(&'static str),
+}
+
+impl Display for PackageParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PackageParseError::UnknownCmd(cmd) => write!(f, "unknown command {cmd}"),
+            PackageParseError::MissingArgs(args) => {
+                write!(f, "insufficient args provided, expected [{args}]")
+            }
         }
     }
+}
 
-    pub fn msg(
-        channel: impl Into<String>,
-        sender: impl Into<String>,
-        msg: impl Into<String>,
-    ) -> Self {
-        Self {
-            cmd: "msg".to_string(),
-            args: vec![channel.into(), sender.into(), msg.into()],
+#[macro_export]
+macro_rules! package_enum {
+    ($(#[$meta:meta])* $vis:vis enum $enum:ident {
+        $(
+            $var:ident ($cmd:expr $(=> $([$vec:ident])? $($($arg:ident),+ $(,)?)?)?)
+        ),+ $(,)?
+    }) => {
+        $($($crate::check_exactly_one!("either one `[arg]` or multiple `args` may be specified", $($vec)? $(($($arg)+))?);)?)+
+        $(#[$meta])*
+        $vis enum $enum {
+            $(
+                $var $(($($crate::ignore!((Vec<String>) $vec))? $($($crate::ignore!((String) $arg)),+)?))?,
+            )+
+        }
+
+        impl $enum {
+            // needed because `Connection::send_package` takes
+            // `impl Borrow<Package>`, so type inference can't
+            // figure out `self.into()` should produce a `Package`
+            pub fn package(self) -> $crate::connect::Package {
+                self.into()
+            }
+
+            ::paste::paste! {$(
+                pub fn [<$var:snake>]($($($vec: impl IntoIterator<Item = impl Into<String>>)? $($($arg: impl Into<String>),+)?)?) -> Self {
+                    Self::$var $((
+                        $($vec.into_iter().map(Into::into).collect())?
+                        $($($arg.into()),+)?
+                    ))?
+                }
+            )+}
+        }
+
+        impl ::std::convert::From<$enum> for $crate::connect::Package {
+            fn from(value: $enum) -> Self {
+                match value {
+                    $($enum::$var $((
+                        $($vec)?
+                        $($($arg),+)?
+                    ))? => $crate::connect::Package {
+                        cmd: $cmd.to_string(),
+                        $(args: $($vec)? $(vec![$($arg),+])? ,)?
+                        ..Default::default()
+                    },)+
+                }
+            }
+        }
+
+        impl ::std::convert::TryFrom<$crate::connect::Package> for $enum {
+            type Error = $crate::connect::PackageParseError;
+
+            fn try_from(value: $crate::connect::Package) -> Result<Self, Self::Error> {
+                Ok(match value.cmd.as_str() {
+                    $(
+                        $cmd => {
+                            $(
+                                $(let [$($arg),+] = $crate::move_vec(value.args)
+                                    .ok_or($crate::connect::PackageParseError::MissingArgs(stringify!($($arg),+)))?;)?
+                                $(let $vec = value.args;)?
+                            )?
+                            Self::$var $(($($vec)? $($($arg),+)?))?
+                        }
+                    )+
+                    _ => return Err($crate::connect::PackageParseError::UnknownCmd(value.cmd)),
+                })
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! ignore {
+    (($($first:tt)*) $($_:tt)*) => {
+        $($first)*
+    };
+}
+
+#[macro_export]
+macro_rules! check_exactly_one {
+    ($_:expr, $tt:tt) => {};
+    ($err:expr, $($_:tt)*) => {
+        std::compile_error!($err);
+    };
+}
+
+#[cfg(test)]
+mod test {
+    // just to test it compiles
+    package_enum! {
+        #[derive(Debug)]
+        pub enum Test {
+            NoOp("noop"),
+            V("v" => [vec]),
+            Args("args" => arg1, arg2),
         }
     }
 }
 
 const BUF_SIZE: usize = 256;
-const PKG_START: &str = "\x02"; // STX
-const PKG_END: &str = "\x03"; // ETX
-const CMD_END: &str = "\x16"; // SYN
-const ARG_END: &str = "\x19"; // EM
 
 pub struct Connection {
     stream: TcpStream,
@@ -119,7 +220,7 @@ impl Connection {
             }
             self.pkg_part += &String::from_utf8_lossy(&self.buffer[..read_bytes]);
         }
-        if let Some(idx) = self.pkg_part.find(PKG_END) {
+        if let Some(idx) = self.pkg_part.find(Package::PKG_END) {
             let (curr, next) = self.pkg_part.split_at(idx + 1);
             let ret = Package::parse(curr);
             self.pkg_part = String::from(next);
