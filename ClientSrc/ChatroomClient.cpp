@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -138,6 +139,7 @@ void serverRead(boost::circular_buffer<std::string> &output){
   char pos;
   while (read(socketFd, &pos, 1) && pos != '\002') {}
   std::string buf;
+  std::string construcktedOutput;
   while (read(socketFd, &pos, 1)){ // TODO err;
     switch (pos) {
       case 'e': ///<Error massage was send
@@ -154,13 +156,14 @@ void serverRead(boost::circular_buffer<std::string> &output){
         break;;
       case 'm':
         read(socketFd, notUsed, 3);
+        ///Pars the channel argument
         buf.clear();
-        while (read(socketFd, &pos, 1) && pos != '\031') {
+        while (read(socketFd, &pos, 1) && pos != '\003') {
           buf += pos;
         }
         read(socketFd, notUsed, 1);
         serverDataMut.lock();
-        std::cerr << buf << std::endl;
+        std::replace(buf.begin(), buf.end(), '\031', ' ');
         output.push_back(std::string(buf));
         serverDataMut.unlock();
         break;;
@@ -172,8 +175,6 @@ void serverRead(boost::circular_buffer<std::string> &output){
     }
 
     outputMut.unlock();
-    serverDataMut.lock();
-    serverDataMut.unlock();
   }
 }
 
