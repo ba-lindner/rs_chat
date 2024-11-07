@@ -1,7 +1,8 @@
 use std::{net::TcpListener, thread, time::Duration};
 
 use crate::{
-    connect::{Connection, Package},
+    connection::Connection,
+    package::Package,
     response::Response,
     server::{DIRECT_CHANNEL_NAME, GLOBAL_CHANNEL_NAME},
 };
@@ -23,7 +24,7 @@ impl PrimaryClient {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let local_port = listener.local_addr()?.port();
-        println!("rs_chat primary client running on port {local_port}");
+        println!("rs_chat primary client v{} running on port {local_port}", env!("CARGO_PKG_VERSION"));
         Ok(Self {
             server,
             listener,

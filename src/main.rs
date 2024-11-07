@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use rs_chat::{PrimaryClient, SecondaryClient, Server, TrivialClient};
+use rs_chat::{ListenClient, PrimaryClient, SecondaryClient, Server, TrivialClient};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -30,6 +30,11 @@ enum Commands {
         /// connection string
         conn: String,
     },
+    /// Start the passive client
+    Listen {
+        /// address of server to connect to
+        addr: String,
+    },
 }
 
 fn main() {
@@ -44,6 +49,7 @@ fn main() {
             let (name, addr) = conn_str(&conn);
             TrivialClient::connect(addr, name).unwrap().run();
         }
+        Commands::Listen { addr } => ListenClient::connect(&addr).unwrap().run(),
     }
 }
 

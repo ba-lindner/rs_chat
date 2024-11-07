@@ -1,10 +1,11 @@
 mod client;
-mod connect;
+mod connection;
+mod package;
 mod requests;
 mod response;
 mod server;
 
-pub use client::{PrimaryClient, SecondaryClient, TrivialClient};
+pub use client::{ListenClient, PrimaryClient, SecondaryClient, TrivialClient};
 pub use server::Server;
 
 pub const SERVER_PORT: u16 = 6447;

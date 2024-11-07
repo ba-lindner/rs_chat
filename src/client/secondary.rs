@@ -5,28 +5,11 @@ use std::{
 };
 
 use crate::{
-    connect::Connection, connect::PackageParseError, move_vec, requests::Request,
+    connection::Connection, move_vec, package::PackageParseError, requests::Request,
     response::Response,
 };
 
 use super::{ClientErr, InterClientComm};
-
-/*
-<msg> -> post "" <msg>
-@<name> <msg> -> send <name> <msg>
-/<channel> <msg> -> post <channel> <msg>
-
-? -> this help
-?<c> -> help about specific command
-:? -> about + features
-:q -> !quit
-:w <channel>? -> names <channel>?
-:c -> list_channels (also show joined ones)
-:c <channel> <passwd>? -> new_channel / subscribe / unsubscribe
-:b <name> -> (un)block
-:o -> offenses
-:p <name> -> pardon <name>
-*/
 
 const START_MESSAGE: &str = concat!(
     "rs_chat secondary client v",
@@ -116,6 +99,7 @@ enum UserCmd {
     Block(String),
     Offenses,
     Pardon(String),
+    /// top secret, don't tell anybody
     SecretHelp,
 }
 
@@ -186,6 +170,10 @@ impl SecondaryClient {
         })
     }
 
+    /// run the client
+    /// 
+    /// this function will only return when either an unrecoverable error has occured
+    /// or the user decided to quit (see [`Happenings`])
     pub fn run(&mut self) {
         println!("{}", START_MESSAGE);
         loop {
@@ -210,12 +198,9 @@ impl SecondaryClient {
         }
     }
 
+    /// try to figure out what the user intended to do
     fn parse_input(inp: &str) -> Option<UserCmd> {
-        let trimmed = if inp.is_empty() {
-            return None;
-        } else {
-            inp[1..].trim_start()
-        };
+        let trimmed = inp.get(1..)?.trim_start();
         Some(match inp.chars().next()? {
             '@' => {
                 let Some((name, msg)) = trimmed.split_once(char::is_whitespace) else {

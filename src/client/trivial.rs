@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::connect::{Connection, Package};
+use crate::{connection::Connection, package::Package};
 
 use super::{server_connection, ClientErr};
 

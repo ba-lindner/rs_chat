@@ -1,24 +1,20 @@
 use std::io::Error;
 
+mod listen;
 mod primary;
 mod secondary;
 mod trivial;
 
-use crate::{
-    connect::{Connection, Package},
-    package_enum, SERVER_PORT,
-};
+use crate::{connection::Connection, package_enum, requests::Request, SERVER_PORT};
 
+pub use listen::ListenClient;
 pub use primary::PrimaryClient;
 pub use secondary::SecondaryClient;
 pub use trivial::TrivialClient;
 
 fn server_connection(addr: &str, name: &str) -> Result<Connection, ClientErr> {
     let mut conn = Connection::to((addr, SERVER_PORT))?;
-    conn.send_package(Package {
-        cmd: "login".to_string(),
-        args: vec![name.to_string()],
-    });
+    conn.send_package(Request::login(name).package());
     if conn.wait_package().is_some_and(|p| &p.cmd == "ack") {
         Ok(conn)
     } else {

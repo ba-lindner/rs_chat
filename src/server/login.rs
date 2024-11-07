@@ -1,6 +1,6 @@
 use std::{io::Error, net::TcpListener, sync::mpsc::Sender, thread, time::Duration};
 
-use crate::{connect::Connection, requests::Request, response::Response, SERVER_PORT};
+use crate::{connection::Connection, requests::Request, response::Response, SERVER_PORT};
 
 use super::Client;
 

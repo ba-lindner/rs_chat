@@ -9,11 +9,7 @@ use std::{
 //mod bot;
 mod login;
 
-use crate::{
-    connect::{Connection, Package},
-    requests::Request,
-    response::Response,
-};
+use crate::{connection::Connection, package::Package, requests::Request, response::Response};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "";
 pub const DIRECT_CHANNEL_NAME: &str = "__direct";
