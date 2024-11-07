@@ -110,7 +110,7 @@ void inputRead(std::string &output, inputStat &status){
       case '\n':
         ///send data to the server
         std::cerr << "sending: " << output << std::endl;
-        messag = "\002post\026\031" + output + '\003';
+        messag = "\002post\026\031" + output + '\031' + '\003';
         write(socketFd, messag.c_str(), messag.length());
         inputDataMut.lock();
         output.clear();
@@ -138,12 +138,22 @@ void serverRead(boost::circular_buffer<std::string> &output){
   char pos;
   while (read(socketFd, &pos, 1) && pos != '\002') {}
   std::string buf;
-  while (1) {
-    read(socketFd, &pos, 1); // TODO err;
+  while (read(socketFd, &pos, 1)){ // TODO err;
     switch (pos) {
       case 'e': ///<Error massage was send
-        read(socketFd, notUsed, 4);
-        pos = notUsed[3];
+        read(socketFd, notUsed, 3);
+        buf.clear();
+        while (read(socketFd, &pos, 1) && pos != '\031') {
+          buf += pos;
+        }
+        read(socketFd, notUsed, 1);
+        serverDataMut.lock();
+        std::cerr << buf << std::endl;
+        output.push_back(std::string(buf));
+        serverDataMut.unlock();
+        break;;
+      case 'm':
+        read(socketFd, notUsed, 3);
         buf.clear();
         while (read(socketFd, &pos, 1) && pos != '\031') {
           buf += pos;
@@ -155,9 +165,7 @@ void serverRead(boost::circular_buffer<std::string> &output){
         serverDataMut.unlock();
         break;;
       case 'a': ///<Ack was send
-      case 'm': ///<A massage was sent
       case 'i': ///<An information was sent
-      case 0: ///<New to read mor to get the messcommand
       default: ///< Error!
         std::cerr << "server send the folowing garbag: " << pos << std::endl;
         while (read(socketFd, &pos, 1) && pos != '\002') {}
