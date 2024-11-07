@@ -37,6 +37,14 @@ impl From<Error> for ClientErr {
     }
 }
 
+/// Communication between primary and secondary clients.
+/// 
+/// Two groups exist:
+/// * metadata: updates information about name, joined channels and blocked users
+/// * quit: signals the primary client to stop running
+/// 
+/// To distinguish between regular packages sent between client and server and
+/// inter-client communication, these commands all have a leading `:`, e.g. `:name`.
 enum InterClientComm {
     Name(String),
     Channels(Vec<String>),

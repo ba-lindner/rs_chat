@@ -94,6 +94,11 @@ Reduces the number of offenses of that player by 1.
 If this player did not have any offenses, it will be counted as an offense by you.
 A name check analog to direct messages will be performed.";
 
+/// Things a user might want to do
+/// 
+/// In most cases, this translates to one [`Request`].
+/// However, there may be additional requests
+/// prior to the main one or none at all.
 enum UserCmd {
     DirectMsg(String, String),
     ChannelMsg(String, String),
@@ -111,6 +116,11 @@ enum UserCmd {
     SecretHelp,
 }
 
+/// Unexpected things that can occur
+/// 
+/// This is either an error or a signal that the user
+/// decided to quit the client. An error may be significant
+/// enough to cause the client to stop, but is not required to do so. 
 enum Happenings {
     ResponseErr(ResponseError),
     OwnMistake(String),
@@ -125,6 +135,11 @@ impl From<ResponseError> for Happenings {
     }
 }
 
+/// A secondary client, used to write messages and send commands
+/// 
+/// Secondary clients require a primary client
+/// and can thus only be created with [`connect`](Self::connect).
+/// It keeps track of its own name aswell as joined channels and blocked users
 pub struct SecondaryClient {
     conn: Connection,
     name: String,
@@ -133,6 +148,10 @@ pub struct SecondaryClient {
 }
 
 impl SecondaryClient {
+    /// Connect to a primary client
+    /// 
+    /// Requires the primary client to send the metadata upon connection
+    /// (see [`InterClientComm`])
     pub fn connect(port: u16) -> Result<Self, ClientErr> {
         let mut conn = Connection::to(("127.0.0.1", port))?;
         let Ok(InterClientComm::Name(name)) = conn
@@ -190,7 +209,7 @@ impl SecondaryClient {
 
     fn parse_input(inp: &str) -> Option<UserCmd> {
         let trimmed = if inp.is_empty() {
-            inp
+            return None;
         } else {
             inp[1..].trim_start()
         };
