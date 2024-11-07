@@ -1,8 +1,10 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <ostream>
 #include <string>
@@ -25,35 +27,42 @@ void inputRead(std::string &output, inputStat &);
 void set_keypress(termios& stored_settings);
 int GetSocket(const char *ip, int port);
 
+int socketFd;
 int main(int argc, const char *argv[]){
-  ///Do the login to the server:
-  std::cout << "Pleas enter the ip of the server: ";
-  std::string ipStr;
-  std::cin >> ipStr;
-  std::cout << "Pleas enter the server Port(standart is 6447): ";
-  int portNum;
-  std::cin >> portNum;
-  std::cout << "Pleas enter your name: ";
   std::string name;
-  std::cin >> name;
+start:
+  {
+    ///Do the login to the server:
+    std::cout << "Pleas enter the ip of the server: ";
+    std::string ipStr;
+    std::cin >> ipStr;
+    std::cout << "Pleas enter the server Port(standart is 6447): ";
+    int portNum;
+    std::cin >> portNum;
+    std::cout << "Pleas enter your name: ";
+    std::cin >> name;
 
-  std::string login = "\002login\026" + name + "\031\003"; 
-  int socket = ::GetSocket(ipStr.c_str(), portNum);
-  write(socket, login.c_str(), login.length());
-  while (1) {
-    std::cout << ::read(socket, (void*)login.c_str(), login.length()) << " " << login << std::endl;
+    std::string login = "\002login\026" + name + "\031\003"; 
+    socketFd = ::GetSocket(ipStr.c_str(), portNum);
+    write(socketFd, login.c_str(), login.length());
+    /*char buf[1024];
+    buf[::read(socketFd, buf, 1024)] = 0; //TODO:
+    if(::strcmp(buf, "\002ack\026\003")){
+      std::cout << "error while login" << buf << std::endl;
+      goto start;
+    }*/
   }
-
   ///terminal and input buffer settings
   termios stored_settings;
   set_keypress(stored_settings); 
   setvbuf(stdin, NULL, _IONBF, 0);
   
   ///setup of server communikation thread
-  boost::circular_buffer<std::string> serverData(127);
+  boost::circular_buffer<std::string> serverData(5);
   for (int i = 0; i < 127; ++i) {
-    serverData.push_back(std::string(""));
+    serverData.push_back(std::string());
   }
+  serverData.push_back(std::string("loged in as " + name));
   std::thread serverReader(serverRead, std::ref(serverData));
 
   ///setup of the input henadeling thread
@@ -65,8 +74,9 @@ int main(int argc, const char *argv[]){
     std::this_thread::sleep_for(std::chrono::milliseconds(3));
     printf("\033c");
     serverDataMut.lock();
-    for (auto i : serverData) {
-      std::cout << i << std::endl;
+    for (auto i = serverData.begin(); serverData.end() != i; ++i) {
+      std::cout << *i << std::endl;
+    
     }
     serverDataMut.unlock();
     
@@ -90,6 +100,7 @@ void inputRead(std::string &output, inputStat &status){
   while (1) {
     int zwi = getc(stdin);
     std::cerr << zwi << std::endl;
+    std::string messag;
     switch (zwi) {
       case '\177':
         inputDataMut.lock();
@@ -99,6 +110,8 @@ void inputRead(std::string &output, inputStat &status){
       case '\n':
         ///send data to the server
         std::cerr << "sending: " << output << std::endl;
+        messag = "\002post\026\031" + output + '\003';
+        write(socketFd, messag.c_str(), messag.length());
         inputDataMut.lock();
         output.clear();
         inputDataMut.unlock();
@@ -115,13 +128,44 @@ void inputRead(std::string &output, inputStat &status){
   }
 }
 
+#define READ len = read(socketFd, buf, 1023); len[buf] = 0; i = buf;
+#define GET_CHAR(the_char) ++i; while(0){ \
+  if(!*i) {READ; i = buf; continue;}\
+  else if(*i != the_char) { /*TODO error*/}\
+  else;
 void serverRead(boost::circular_buffer<std::string> &output){
+  char notUsed[32];
+  char pos;
+  while (read(socketFd, &pos, 1) && pos != '\002') {}
+  std::string buf;
   while (1) {
+    read(socketFd, &pos, 1); // TODO err;
+    switch (pos) {
+      case 'e': ///<Error massage was send
+        read(socketFd, notUsed, 4);
+        pos = notUsed[3];
+        buf.clear();
+        while (read(socketFd, &pos, 1) && pos != '\031') {
+          buf += pos;
+        }
+        read(socketFd, notUsed, 1);
+        serverDataMut.lock();
+        std::cerr << buf << std::endl;
+        output.push_back(std::string(buf));
+        serverDataMut.unlock();
+        break;;
+      case 'a': ///<Ack was send
+      case 'm': ///<A massage was sent
+      case 'i': ///<An information was sent
+      case 0: ///<New to read mor to get the messcommand
+      default: ///< Error!
+        std::cerr << "server send the folowing garbag: " << pos << std::endl;
+        while (read(socketFd, &pos, 1) && pos != '\002') {}
+    }
+
     outputMut.unlock();
     serverDataMut.lock();
-    output.push_back(std::string("test nachricht"));
     serverDataMut.unlock();
-    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
   }
 }
 
