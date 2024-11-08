@@ -73,21 +73,109 @@ package_enum! {
         /// Note that this will not list every user as clients
         /// are allowed to unsubscribe from the global channel.
         /// 
-        /// This request is responded to with `Ack` in case of success.
+        /// This request is responded to with `Info` in case of success.
+        /// The response contains a list with the
+        /// names of all clients in this channel.
         /// 
         /// ## Error cases
         /// * the channel does not exist
         /// * you have not joined the channel
         Names("names" => channel),
+        /// Get the name of the server
+        /// 
+        /// This request is responded to with `Info` in case of success.
+        /// The response contains AT LEAST one argument with the name
+        /// of the server. A server MAY send any number of additional arguments.
+        /// 
+        /// This request will never fail.
         About("about"),
+        /// Get the features supported by the server
+        /// 
+        /// This request is responded to with `Info` in case of success.
+        /// The response contains a list of all supported features.
+        /// 
+        /// This request will never fail.
         Features("features"),
+        /// Create a new channel
+        /// 
+        /// To create a new channel that anyone can join,
+        /// simply leave the password empty.
+        /// 
+        /// This request is responded to with `Ack` in case of success.
+        /// 
+        /// ## Error cases
+        /// * the channel name is invalid
+        /// * the channel name is already used
         NewChannel("new_channel" => channel, password),
+        /// List all available channels
+        /// 
+        /// This request is responded to with `Info` in case of success.
+        /// The response contains a list of all channels.
+        /// 
+        /// This request will never fail.
         ListChannels("list_channels"),
+        /// Subscribe to a channel
+        /// 
+        /// This request is responded to with `Ack` in case of success.
+        /// 
+        /// ## Error cases
+        /// * the channel name is invalid
+        /// * the channel doesn't exist
+        /// * the password is incorrect
+        /// * you have already subscribed to the channel
         Subscribe("subscribe" => channel, password),
+        /// Unsubscribe from a channel
+        /// 
+        /// This request is responded to with `Ack` in case of success.
+        /// 
+        /// ## Error cases
+        /// * the channel name is invalid
+        /// * the channel doesn't exist
+        /// * you have not subscribed to the channel
         Unsubscribe("unsubscribe" => channel),
+        /// Block direct messages from a user
+        /// 
+        /// This prevents any direct communication between the client
+        /// sending this request and the blocked client.
+        /// 
+        /// This request is responded to with `Ack` in case of success.
+        /// 
+        /// ## Error cases
+        /// * the user name is invalid
+        /// * the user doesn't exist
+        /// * you have already blocked the user
         Block("block" => name),
+        /// Unblock a user
+        /// 
+        /// This reverts the effect of a prior `Block` request
+        /// 
+        /// Note that you may unblock a user even after he has left,
+        /// when all other requests regarding that user would fail with
+        /// 'user doesn't exist'.
+        /// 
+        /// This request is responded to with `Ack` in case of success.
+        /// 
+        /// ## Error cases
+        /// * the user name is invalid
+        /// * you didn't blocked the user
         Unblock("unblock" => name),
+        /// Find out how often you have offended the server
+        /// 
+        /// This request is responded to with `Info` in case of success.
+        /// The response contains AT LEAST one argument with the number
+        /// of your offenses. A server MAY send an additional
+        /// argument containing the maximal number of offenses.
+        /// 
+        /// This request will never fail.
         Offenses("offenses"),
+        /// Pardon another player, reducing his offenses by one
+        /// 
+        /// This request is responded to with `Ack` in case of success.
+        /// 
+        /// ## Error cases
+        /// * the user name is invalid
+        /// * the user doesn't exist
+        /// * the user did not have any offenses
         Pardon("pardon" => name),
     }
 }
@@ -129,6 +217,7 @@ fn is_ident_ok(ident: &str) -> bool {
     ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Reasons a request is immediately rejected
 #[derive(Debug)]
 pub enum RequestErr {
     InvalidName,

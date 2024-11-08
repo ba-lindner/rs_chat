@@ -49,7 +49,7 @@ impl Client {
 struct Channel {
     name: String,
     password: String,
-    members: Vec<String>,
+    members: HashSet<String>,
     msg_queue: Vec<Package>,
 }
 
@@ -58,7 +58,7 @@ impl Channel {
         Self {
             name,
             password,
-            members: vec![founder],
+            members: HashSet::from([founder]),
             msg_queue: Vec::new(),
         }
     }
@@ -131,7 +131,7 @@ impl Server {
                         .get_mut(GLOBAL_CHANNEL_NAME)
                         .expect("global channel should always exist")
                         .members
-                        .push(name);
+                        .insert(name);
                 }
             } else {
                 new_client.conn.send_package(Response::Ack.package());
@@ -201,8 +201,12 @@ impl Server {
                     .get_mut(&channel)
                     .ok_or(Response::err("channel doesn't exist"))?;
                 if chan.password == passwd {
-                    chan.members.push(client.clone());
-                    Response::Ack
+                    if chan.members.contains(client) {
+                        Response::err("already subscribed to channel")
+                    } else {
+                        chan.members.insert(client.clone());
+                        Response::Ack
+                    }
                 } else {
                     Response::err("wrong password")
                 }

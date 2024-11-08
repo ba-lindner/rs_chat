@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    connection::Connection, move_vec, package::PackageParseError, requests::Request,
+    connection::Connection, package::PackageParseError, requests::Request,
     response::Response,
 };
 
@@ -305,38 +305,31 @@ impl SecondaryClient {
                 }
                 return Err(Happenings::QuitCmd);
             }
-            UserCmd::ChannelList => println!(
-                "channels: {}",
-                Disp(
-                    &self
-                        .info_request(Request::ListChannels)?
-                        .into_iter()
-                        .map(|c| {
-                            if self.channels.contains(&c) {
-                                format!("(*) {}", channel_name(&c))
-                            } else {
-                                channel_name(&c).to_string()
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                )
-            ),
+            UserCmd::ChannelList => {
+                let mut disp = String::from("channels: ");
+                for chan in self.info_request(Request::ListChannels)? {
+                    if self.channels.contains(&chan) {
+                        disp += "(*) ";
+                    }
+                    disp = disp + channel_name(&chan) + ", ";
+                }
+                println!("{}", &disp[..disp.len() - 2]);
+            }
             UserCmd::ServerInfo => {
-                println!(
-                    "server: {}",
-                    self.info_request(Request::About)?
-                        .first()
-                        .ok_or(Happenings::ProtocolViolation)?
-                );
+                println!("server: {}", Disp(&self.info_request(Request::About)?));
                 println!(
                     "available features: {}",
                     Disp(&self.info_request(Request::Features)?)
                 );
             }
             UserCmd::Offenses => {
-                let [own, max] = move_vec(self.info_request(Request::Offenses)?)
-                    .ok_or(Happenings::ProtocolViolation)?;
-                println!("your offenses: {own} / {max}");
+                let resp = self.info_request(Request::Offenses)?;
+                let own = resp.first().ok_or(Happenings::ProtocolViolation)?;
+                if let Some(max) = resp.get(1) {
+                    println!("your offenses: {own} / {max}");
+                } else {
+                    println!("your offenses: {own}");
+                }
             }
             UserCmd::Who(chan) => {
                 if self.channels.contains(&chan) {
@@ -404,17 +397,18 @@ impl SecondaryClient {
             UserCmd::ChannelJoinNew(channel, passwd) => {
                 if self.channels.contains(&channel) {
                     eprintln!("you are already in {}", channel_name(&channel))
-                }
-                if self.info_request(Request::ListChannels)?.contains(&channel) {
-                    self.ack_request(Request::Subscribe(channel.clone(), passwd))?;
-                    println!("joined {}", channel_name(&channel));
                 } else {
-                    self.ack_request(Request::NewChannel(channel.clone(), passwd))?;
-                    println!("created {}", channel_name(&channel));
+                    if self.info_request(Request::ListChannels)?.contains(&channel) {
+                        self.ack_request(Request::Subscribe(channel.clone(), passwd))?;
+                        println!("joined {}", channel_name(&channel));
+                    } else {
+                        self.ack_request(Request::NewChannel(channel.clone(), passwd))?;
+                        println!("created {}", channel_name(&channel));
+                    }
+                    self.channels.push(channel);
+                    self.conn.send_package(InterClientComm::Channels(self.channels.clone()).package());
                 }
-                self.channels.push(channel);
-                self.conn
-                    .send_package(InterClientComm::Channels(self.channels.clone()).package());
+                
             }
         }
         Ok(())

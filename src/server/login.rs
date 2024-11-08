@@ -4,7 +4,7 @@ use crate::{connection::Connection, requests::Request, response::Response, SERVE
 
 use super::Client;
 
-const MAX_AGE: u32 = 20;
+const MAX_AGE: u32 = 200;
 
 pub fn login_thread(tx: Sender<Client>) -> Result<(), Error> {
     let listener = TcpListener::bind(("127.0.0.1", SERVER_PORT))?;
@@ -27,7 +27,7 @@ pub fn login_thread(tx: Sender<Client>) -> Result<(), Error> {
                     Err(()) => (age < MAX_AGE).then_some((conn, age + 1)),
                 })
                 .collect();
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(50));
         }
     });
     Ok(())

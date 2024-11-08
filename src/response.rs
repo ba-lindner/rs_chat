@@ -22,6 +22,10 @@ package_enum! {
         /// INFO: request successfull, requested data provided as args
         Info("info" => [data]),
         /// MSG: you've got mail!
+        /// 
+        /// Arguments are `channel`, `sender` and `message`.
+        /// Channel may be empty (global channel) or
+        /// `__direct` (direct messages).
         Msg("msg" => channel, name, msg),
     }
 }
